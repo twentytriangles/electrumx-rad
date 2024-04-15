@@ -105,13 +105,19 @@ def double_sha256(x):
     '''SHA-256 of SHA-256, as used extensively in bitcoin.'''
     return sha256(sha256(x))
 
+def sha512_256(x):
+    '''SHA-512/256'''
+    firsthash = SHA512.new(truncate="256")
+    firsthash.update(x)
+    return firsthash.digest()
+
 def double_sha512_256(x):
-    '''SHA-512/256 of SHA-512/256, as used extensively in radiant.'''
-    h = SHA512.new(truncate="256")
-    h.update(x)
-    dh = SHA512.new(truncate="256")
-    dh.update(h.digest())
-    return dh.digest()
+    '''SHA-512/256 of SHA-512/256'''
+    firsthash = SHA512.new(truncate="256")
+    firsthash.update(x)
+    secondhash = SHA512.new(truncate="256")
+    secondhash.update(firsthash.digest())
+    return secondhash.digest()
 
 def hash_to_hex_str(x):
     '''Convert a big-endian binary hash to displayed hex string.
