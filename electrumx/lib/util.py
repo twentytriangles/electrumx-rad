@@ -145,9 +145,10 @@ def subclasses(base_class, strict=True):
     return [pair[1] for pair in pairs]
 
 
-def chunks(items, size):
+def chunks(items, size, reverse=False):
     '''Break up items, an iterable, into chunks of length size.'''
-    for i in range(0, len(items), size):
+    r = range(0, len(items), size)
+    for i in reversed(r) if reverse else r:
         yield items[i: i + size]
 
 
