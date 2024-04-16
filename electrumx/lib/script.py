@@ -156,6 +156,7 @@ assert OpCodes.OP_CODESCRIPTBYTECODE_UTXO == 0xe9
 assert OpCodes.OP_CODESCRIPTBYTECODE_OUTPUT == 0xea
 assert OpCodes.OP_STATESCRIPTBYTECODE_UTXO == 0xeb
 assert OpCodes.OP_STATESCRIPTBYTECODE_OUTPUT == 0xec
+assert OpCodes.OP_PUSH_TX_STATE == 0xed
 
 def is_unspendable_legacy(script):
     # OP_FALSE OP_RETURN or OP_RETURN
