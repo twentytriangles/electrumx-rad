@@ -1453,32 +1453,6 @@ class ElectrumX(SessionBase):
 
         return {"block_height": height, "merkle": branch, "pos": tx_pos}
 
-    async def transaction_tsc_merkle(self, tx_hash, height, txid_or_tx='txid',
-                                     target_type='block_hash'):
-        '''Return the TSC merkle proof in JSON format to a confirmed transaction given its hash.
-        See: https://tsc.bitcoinassociation.net/standards/merkle-proof-standardised-format/.
-
-        tx_hash: the transaction hash as a hexadecimal string
-        include_tx: whether to include the full raw transaction in the response or txid.
-        target: options include: ('merkle_root', 'block_header', 'block_hash', 'None')
-        '''
-        tx_hash = assert_tx_hash(tx_hash)
-        height = non_negative_integer(height)
-
-        tsc_proof, cost = await self.session_mgr.tsc_merkle_proof_for_tx_hash(
-            height, tx_hash, txid_or_tx, target_type)
-        self.bump_cost(cost)
-
-        return {
-            "index": tsc_proof['index'],
-            "txOrId": tsc_proof['txid_or_tx'],
-            "target": tsc_proof['target'],
-            "nodes": tsc_proof['nodes'],  # "*" is used to represent duplicated hashes
-            "targetType": target_type,
-            "proofType": "branch",  # "tree" option is not supported by ElectrumX
-            "composite": False  # composite option is not supported by ElectrumX
-        }
-
     async def transaction_id_from_pos(self, height, tx_pos, merkle=False):
         '''Return the txid and optionally a merkle proof, given
         a block height and position in the block.
@@ -1525,7 +1499,6 @@ class ElectrumX(SessionBase):
             'blockchain.transaction.broadcast': self.transaction_broadcast,
             'blockchain.transaction.get': self.transaction_get,
             'blockchain.transaction.get_merkle': self.transaction_merkle,
-            'blockchain.transaction.get_tsc_merkle': self.transaction_tsc_merkle,
             'blockchain.transaction.id_from_pos': self.transaction_id_from_pos,
             'mempool.get_fee_histogram': self.compact_fee_histogram,
             'server.add_peer': self.add_peer,
