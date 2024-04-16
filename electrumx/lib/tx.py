@@ -188,11 +188,7 @@ class Deserializer(object):
             hashOutputHashes,
             pack_le_uint32(tx.locktime)
         ))
-        h = double_sha256(preimage)
-        print("v3 txid: {}".format(h.hex()))
-        print("v3 pre: {}".format(preimage.hex()))
-        return h
-
+        return double_sha256(preimage)
  
     def get_hash_prev_inputs(self, tx):
         inputs = b''
@@ -218,15 +214,19 @@ class Deserializer(object):
 
     # Generate the hash of the output hashes
     def calculate_pushrefs_count_and_hash(self, pk_script):
-        outputs = b''
         zeroRef = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-        push_input_refs = Script.get_push_input_refs(pk_script)
-        if len(push_input_refs) > 0:
-            push_input_refs_hash = double_sha256(b''.join(sorted(push_input_refs)))
+        push_input_refs_structs = Script.get_push_input_refs(pk_script)
+        # Put refs into a dict to sort in order
+        ref_dict = {}
+        for ref in push_input_refs_structs:
+            ref_dict[ref['r']] = True 
+        push_input_refs_hash = None
+        if len(ref_dict) > 0:
+            push_input_refs_hash = double_sha256(b''.join(sorted(ref_dict.keys())))
         else:
             push_input_refs_hash = zeroRef
         
-        result = b''.join((pack_le_uint32(len(push_input_refs) ), push_input_refs_hash))
+        result = b''.join((pack_le_uint32(len(ref_dict) ), push_input_refs_hash))
         return result
 
     # Generate the hash of the output hashes

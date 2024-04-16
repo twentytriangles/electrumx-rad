@@ -279,8 +279,11 @@ class Script(object):
                 if op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
                     dlen = 36 # Grab 36 bytes
                 
-                    if op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
-                        push_input_refs.append(script[n:n + dlen]) 
+                    if op == OpCodes.OP_PUSHINPUTREF:
+                        push_input_refs.append({'r': script[n:n + dlen], 't': 0})
+                    
+                    if op == OpCodes.OP_PUSHINPUTREFSINGLETON:
+                        push_input_refs.append({'r': script[n:n + dlen], 't': 1})
 
                     if n + dlen > len(script):
                         raise IndexError
