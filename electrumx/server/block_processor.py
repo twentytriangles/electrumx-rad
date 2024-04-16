@@ -18,7 +18,7 @@ from aiorpcx import TaskGroup, CancelledError
 import electrumx
 from electrumx.server.daemon import DaemonError
 from electrumx.lib.hash import hash_to_hex_str, HASHX_LEN
-from electrumx.lib.script import is_unspendable_legacy, is_unspendable_genesis
+from electrumx.lib.script import is_unspendable_legacy, is_unspendable_genesis, Script
 from electrumx.lib.util import (
     class_logger, pack_le_uint32, pack_le_uint64, unpack_le_uint64
 )
@@ -377,8 +377,7 @@ class BlockProcessor:
         min_height = self.db.min_undo_height(self.daemon.cached_height())
         height = self.height + 1
 
-        is_unspendable = (is_unspendable_genesis if height >= self.coin.GENESIS_ACTIVATION
-                          else is_unspendable_legacy)
+        is_unspendable = is_unspendable_legacy
         undo_info = self.advance_txs(block.transactions, is_unspendable)
         if height >= min_height:
             self.undo_infos.append((undo_info, height))
@@ -426,10 +425,25 @@ class BlockProcessor:
                     continue
 
                 # Get the hashX
-                hashX = script_hashX(txout.pk_script)
+                zero_refs = Script.zero_refs(txout.pk_script)
+                hashX = script_hashX(zero_refs)
+
                 append_hashX(hashX)
                 put_utxo(tx_hash + to_le_uint32(idx),
                          hashX + tx_numb + to_le_uint64(txout.value))
+
+                normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
+
+                # Get up to 3 singletons, anything more seems excessive
+                ref_hashes = [script_hashX(ref) for ref in singleton_refs[0:3]]
+                for ref_hash in ref_hashes:
+                    append_hashX(ref_hash)
+
+                # Track normal ref mints
+                for ref in normal_refs[0:3]:
+                    for txin in tx.inputs:
+                        if txin.prev_hash == ref[:32] and to_le_uint32(txin.prev_idx) == ref[32:]:
+                            append_hashX(script_hashX(ref))
 
             append_hashXs(hashXs)
             update_touched(hashXs)
@@ -463,8 +477,7 @@ class BlockProcessor:
                                      hash_to_hex_str(self.tip),
                                      self.height))
         self.tip = coin.header_prevhash(block.header)
-        is_unspendable = (is_unspendable_genesis if self.height >= genesis_activation
-                          else is_unspendable_legacy)
+        is_unspendable = is_unspendable_legacy
         self._backup_txs(block.transactions, is_unspendable)
         self.height -= 1
         self.db.tx_counts.pop()
@@ -485,6 +498,7 @@ class BlockProcessor:
         spend_utxo = self.spend_utxo
         touched = self.touched
         undo_entry_len = 13 + HASHX_LEN
+        script_hashX = self.coin.hashX_from_script
 
         for tx, tx_hash in reversed(txs):
             for idx, txout in enumerate(tx.outputs):
@@ -495,6 +509,17 @@ class BlockProcessor:
 
                 cache_value = spend_utxo(tx_hash, idx)
                 touched.add(cache_value[:-13])
+
+                normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
+
+                ref_hashes = [script_hashX(ref) for ref in singleton_refs[0:3]]
+                for ref_hash in ref_hashes:
+                    touched.add(ref_hash)
+
+                for ref in normal_refs[0:3]:
+                    for txin in tx.inputs:
+                        if txin.prev_hash == ref[:32] and to_le_uint32(txin.prev_idx) == ref[32:]:
+                            touched(script_hashX(ref))
 
             # Restore the inputs
             for txin in reversed(tx.inputs):

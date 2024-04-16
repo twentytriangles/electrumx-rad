@@ -215,11 +215,11 @@ class Deserializer(object):
     # Generate the hash of the output hashes
     def calculate_pushrefs_count_and_hash(self, pk_script):
         zeroRef = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-        push_input_refs_structs = Script.get_push_input_refs(pk_script)
+        all_refs, normal_refs, singleton_refs = Script.get_push_input_refs(pk_script)
         # Put refs into a dict to sort in order
         ref_dict = {}
-        for ref in push_input_refs_structs:
-            ref_dict[ref['r']] = True 
+        for ref in all_refs:
+            ref_dict[ref] = True 
         push_input_refs_hash = None
         if len(ref_dict) > 0:
             push_input_refs_hash = double_sha256(b''.join(sorted(ref_dict.keys())))

@@ -109,8 +109,7 @@ OpCodes = Enumeration("Opcodes", [
     ("OP_PUSH_TX_STATE", 237)
 ])
 
-# Paranoia to
-#  make it hard to create bad scripts
+# Paranoia to make it hard to create bad scripts
 assert OpCodes.OP_DUP == 0x76
 assert OpCodes.OP_HASH160 == 0xa9
 assert OpCodes.OP_EQUAL == 0x87
@@ -249,7 +248,9 @@ class Script(object):
     # Saves the push input refs of a script in the order they were encountered
     @classmethod
     def get_push_input_refs(cls, script):
-        push_input_refs = []
+        all_refs = []
+        normal_refs = []
+        singleton_refs = []
 
         # The unpacks or script[n] below throw on truncated scripts
         try:
@@ -279,11 +280,13 @@ class Script(object):
                 if op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
                     dlen = 36 # Grab 36 bytes
                 
-                    if op == OpCodes.OP_PUSHINPUTREF:
-                        push_input_refs.append({'r': script[n:n + dlen], 't': 0})
-                    
-                    if op == OpCodes.OP_PUSHINPUTREFSINGLETON:
-                        push_input_refs.append({'r': script[n:n + dlen], 't': 1})
+                    if op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
+                        ref = script[n:n + dlen]
+                        all_refs.append(ref)
+                        if op == OpCodes.OP_PUSHINPUTREF:
+                            normal_refs.append(ref)
+                        elif op == OpCodes.OP_PUSHINPUTREFSINGLETON:
+                            singleton_refs.append(ref)
 
                     if n + dlen > len(script):
                         raise IndexError
@@ -293,7 +296,61 @@ class Script(object):
         except Exception as e:
             raise ScriptError('get_push_input_refs script') from None
 
-        return push_input_refs
+        return (all_refs, normal_refs, singleton_refs)
+
+    @classmethod
+    def zero_refs(cls, script):
+        ops = bytearray()
+        requires_sig = False
+
+        # The unpacks or script[n] below throw on truncated scripts
+        try:
+            n = 0
+            while n < len(script):
+                op = script[n]
+                ops.append(op)
+                n += 1
+
+                # Refs are only zeroed when a check sig opcode is used
+                if op == OpCodes.OP_CHECKSIG or op == OpCodes.OP_CHECKSIGVERIFY or op == OpCodes.OP_CHECKMULTISIG or op == OpCodes.OP_CHECKMULTISIGVERIFY:
+                    requires_sig = True
+
+                if op <= OpCodes.OP_PUSHDATA4:
+                    # Raw bytes follow
+                    if op < OpCodes.OP_PUSHDATA1:
+                        dlen = op
+                    elif op == OpCodes.OP_PUSHDATA1:
+                        dlen = script[n]
+                        n += 1
+                    elif op == OpCodes.OP_PUSHDATA2:
+                        dlen, = unpack_le_uint16_from(script[n: n + 2])
+                        n += 2
+                    elif op == OpCodes.OP_PUSHDATA4:
+                        dlen, = unpack_le_uint32_from(script[n: n + 4])
+                        n += 4
+                    if n + dlen > len(script):
+                        raise IndexError
+
+                    ops.extend(script[n:n + dlen])
+                    n += dlen
+
+                if op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
+                    dlen = 36 # Grab 36 bytes
+
+                    if n + dlen > len(script):
+                        raise IndexError
+
+                    ops.extend(bytes(36))
+                    n += dlen
+
+        except Exception:
+            # Truncated script; e.g. tx_hash
+            # ebc9fa1196a59e192352d76c0f6e73167046b9d37b8302b6bb6968dfd279b767
+            raise ScriptError('truncated script') from None
+
+        if requires_sig:
+            return bytes(ops)
+        return script
 
     @classmethod
     def push_data(cls, data):

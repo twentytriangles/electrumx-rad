@@ -86,6 +86,20 @@ def assert_tx_hash(value):
         pass
     raise RPCError(BAD_REQUEST, f'{value} should be a transaction hash')
 
+def assert_ref(value):
+    '''Raise an RPCError if the value is not a valid hexadecimal ref.
+
+    If it is valid, return it as 36-byte binary ref.
+    '''
+    try:
+        raw_ref = hex_str_to_hash(value[:64]) + hex_str_to_hash(value[64:])
+        if len(raw_ref) == 36:
+            return raw_ref
+
+    except (ValueError, TypeError):
+        pass
+    raise RPCError(BAD_REQUEST, f'{value} should be a ref')
+
 
 @attr.s(slots=True)
 class SessionGroup:
@@ -134,6 +148,9 @@ class SessionManager:
         self._history_cache = pylru.lrucache(1000)
         self._history_lookups = 0
         self._history_hits = 0
+        self._first_last_history_cache = pylru.lrucache(1000)
+        self._first_last_history_lookups = 0
+        self._first_last_history_hits = 0
         self._tx_hashes_cache = pylru.lrucache(1000)
         self._tx_hashes_lookups = 0
         self._tx_hashes_hits = 0
@@ -842,6 +859,24 @@ class SessionManager:
             raise result
         return result, cost
 
+    async def first_last_history(self, hashX):
+        '''Returns the first and last history entries for a hashX'''
+        cost = 0.1
+        self._first_last_history_lookups += 1
+        try:
+            result = self._first_last_history_cache[hashX]
+            self._first_last_history_hits += 1
+        except KeyError:
+            first = await self.db.limited_history(hashX, limit=1)
+            last = await self.db.limited_history(hashX, limit=1, reverse=True)
+            cost += 0.202
+            result = first + last
+            self._first_last_history_cache[hashX] = result
+
+        if isinstance(result, Exception):
+            raise result
+        return result, cost
+
     async def _notify_sessions(self, height, touched):
         '''Notify sessions about height changes and touched addresses.'''
         height_changed = height != self.notified_height
@@ -849,6 +884,9 @@ class SessionManager:
             await self._refresh_hsub_results(height)
             # Invalidate our history cache for touched hashXs
             cache = self._history_cache
+            for hashX in set(cache).intersection(touched):
+                del cache[hashX]
+            cache = self._first_last_history_cache
             for hashX in set(cache).intersection(touched):
                 del cache[hashX]
 
@@ -1453,6 +1491,22 @@ class ElectrumX(SessionBase):
 
         return {"block_height": height, "merkle": branch, "pos": tx_pos}
 
+    async def ref_get(self, ref, verbose = False):
+        '''Return the first and last transactions for a singleton ref or a normal ref mint'''
+        ref = assert_ref(ref)
+        ref_hash = self.env.coin.hashX_from_script(ref)
+        history, cost = await self.session_mgr.first_last_history(ref_hash)
+        self.bump_cost(cost)
+        conf = [{'tx_hash': hash_to_hex_str(tx_hash), 'height': height}
+                for tx_hash, height in history]
+
+        unconf = [{'tx_hash': hash_to_hex_str(tx.hash),
+                   'height': -tx.has_unconfirmed_inputs,
+                   'fee': tx.fee}
+                  for tx in await self.mempool.first_last_summaries(ref_hash)]
+        self.bump_cost(0.25 + len(unconf) / 50)
+
+        return conf + unconf
     async def transaction_id_from_pos(self, height, tx_pos, merkle=False):
         '''Return the txid and optionally a merkle proof, given
         a block height and position in the block.
@@ -1500,6 +1554,7 @@ class ElectrumX(SessionBase):
             'blockchain.transaction.get': self.transaction_get,
             'blockchain.transaction.get_merkle': self.transaction_merkle,
             'blockchain.transaction.id_from_pos': self.transaction_id_from_pos,
+            'blockchain.ref.get': self.ref_get,
             'mempool.get_fee_histogram': self.compact_fee_histogram,
             'server.add_peer': self.add_peer,
             'server.banner': self.banner,
