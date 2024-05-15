@@ -192,6 +192,7 @@ class BlockProcessor:
 
         # UTXO cache
         self.utxo_cache = {}
+        self.ref_cache = {}
         self.db_deletes = []
 
     async def run_with_lock(self, coro):
@@ -307,7 +308,7 @@ class BlockProcessor:
         '''The data for a flush.  The lock must be taken.'''
         assert self.state_lock.locked()
         return FlushData(self.height, self.tx_count, self.headers,
-                         self.tx_hashes, self.undo_infos, self.utxo_cache,
+                         self.tx_hashes, self.undo_infos, self.utxo_cache, self.ref_cache,
                          self.db_deletes, self.tip)
 
     async def flush(self, flush_utxos):
@@ -320,18 +321,20 @@ class BlockProcessor:
         # requesting size from Python (see deep_getsizeof).
         one_MB = 1000*1000
         utxo_cache_size = len(self.utxo_cache) * 205
+        ref_cache_size = len(self.ref_cache) * 38 + (37 * 3) # Assume there are on average 3 refs per utxo when at least 1 ref found
         db_deletes_size = len(self.db_deletes) * 57
         hist_cache_size = self.db.history.unflushed_memsize()
         # Roughly ntxs * 32 + nblocks * 42
         tx_hash_size = ((self.tx_count - self.db.fs_tx_count) * 32
                         + (self.height - self.db.fs_height) * 42)
         utxo_MB = (db_deletes_size + utxo_cache_size) // one_MB
+        ref_MB =  (ref_cache_size) // one_MB
         hist_MB = (hist_cache_size + tx_hash_size) // one_MB
 
         self.logger.info('our height: {:,d} daemon: {:,d} '
-                         'UTXOs {:,d}MB hist {:,d}MB'
+                         'UTXOs {:,d}MB hist {:,d}MB refs {:,d}MB'
                          .format(self.height, self.daemon.cached_height(),
-                                 utxo_MB, hist_MB))
+                                 utxo_MB, hist_MB, ref_MB))
 
         # Flush history if it takes up over 20% of cache memory.
         # Flush UTXOs once they take up 80% of cache memory.
@@ -397,6 +400,7 @@ class BlockProcessor:
         tx_num = self.tx_count
         script_hashX = self.coin.hashX_from_script
         put_utxo = self.utxo_cache.__setitem__
+        put_refs = self.ref_cache.__setitem__
         spend_utxo = self.spend_utxo
         undo_info_append = undo_info.append
         update_touched = self.touched.update
@@ -432,15 +436,30 @@ class BlockProcessor:
                 put_utxo(tx_hash + to_le_uint32(idx),
                          hashX + tx_numb + to_le_uint64(txout.value))
 
-                normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
-
-                # Get up to 3 singletons, anything more seems excessive
-                ref_hashes = [script_hashX(ref) for ref in singleton_refs[0:3]]
+                all_refs, normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)
+                all_refs_dedup = Script.dedup_refs(all_refs)
+                normal_refs_dedup = Script.dedup_refs(normal_refs)
+                singleton_refs_dedup = Script.dedup_refs(singleton_refs)
+                # Save all the refs if any for the utxo
+                refs_value = b''
+                for ref_id in all_refs_dedup.keys():
+                    enc_ref_type = b'00'
+                    # check if it's a singleton ref by first ensuring it's not in the normal refs map
+                    if not normal_refs_dedup.get(ref_id):
+                        assert singleton_refs_dedup.get(ref_id)
+                        enc_ref_type = b'01'
+                    refs_value += ref_id + enc_ref_type
+                # Save the refs for the outpoint
+                if len(refs_value):
+                    put_refs(tx_hash + to_le_uint32(idx), refs_value) 
+                 
+                # Track history singleton refs
+                ref_hashes = [script_hashX(ref) for ref in singleton_refs_dedup.keys()]
                 for ref_hash in ref_hashes:
                     append_hashX(ref_hash)
 
-                # Track normal ref mints
-                for ref in normal_refs[0:3]:
+                # Track history normal refs
+                for ref in normal_refs_dedup.keys():
                     for txin in tx.inputs:
                         if txin.prev_hash == ref[:32] and to_le_uint32(txin.prev_idx) == ref[32:]:
                             append_hashX(script_hashX(ref))
@@ -509,14 +528,15 @@ class BlockProcessor:
 
                 cache_value = spend_utxo(tx_hash, idx)
                 touched.add(cache_value[:-13])
-
+                
+                self.delete_potential_refs(tx_hash, idx)
                 normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
 
-                ref_hashes = [script_hashX(ref) for ref in singleton_refs[0:3]]
-                for ref_hash in ref_hashes:
-                    touched.add(ref_hash)
-
-                for ref in normal_refs[0:3]:
+                # Add history for all singleton refs
+                for ref_hash in singleton_refs:
+                    touched.add(script_hashX(ref_hash))
+                # Add history for all normal refs
+                for ref in normal_refs:
                     for txin in tx.inputs:
                         if txin.prev_hash == ref[:32] and to_le_uint32(txin.prev_idx) == ref[32:]:
                             touched(script_hashX(ref))
@@ -630,6 +650,20 @@ class BlockProcessor:
 
         raise ChainError('UTXO {} / {:,d} not found in "h" table'
                          .format(hash_to_hex_str(tx_hash), tx_idx))
+
+    def delete_potential_refs(self, tx_hash, tx_idx):
+        '''Spend potential refs at an outpoint.
+        '''
+        idx_packed = pack_le_uint32(tx_idx)
+        outpoint = tx_hash + idx_packed
+        # Remove from the cache
+        cached_value = self.ref_cache.pop(outpoint, None)
+        # Remove from db if not present in cache 
+        ri_db_key = b'ri' + outpoint
+        ref_value_packed = self.db.utxo_db.get(ri_db_key)
+        if cached_value and ref_value_packed:
+            raise IndexError(f'Critical Error: Found in cache and DB')
+        self.db_deletes.append(ri_db_key)
 
     async def _process_blocks(self):
         '''Loop forever processing blocks as they arrive.'''

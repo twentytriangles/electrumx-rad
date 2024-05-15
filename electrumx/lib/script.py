@@ -298,7 +298,14 @@ class Script(object):
             raise ScriptError('get_push_input_refs script') from None
 
         return (all_refs, normal_refs, singleton_refs)
-
+    
+    @classmethod 
+    def dedup_refs(cls, refs_list):
+        dedup = {}
+        for ref in refs_list: 
+            dedup[ref] = ref
+        return dedup
+    
     @classmethod
     def zero_refs(cls, script):
         ops = bytearray()
