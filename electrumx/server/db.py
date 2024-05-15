@@ -30,6 +30,9 @@ from electrumx.lib.util import (
 from electrumx.server.storage import db_class
 from electrumx.server.history import History
 
+from electrumx.lib.util import (
+    unpack_le_uint32_from
+)
 
 UTXO = namedtuple("UTXO", "tx_num tx_pos tx_hash height value")
 
@@ -753,3 +756,27 @@ class DB(object):
 
         hashX_pairs = await run_in_thread(lookup_hashXs)
         return await run_in_thread(lookup_utxos, hashX_pairs)
+
+def outpoint_to_str(self, outpoint):
+    num, = unpack_le_uint32_from(outpoint[32:])
+    return f'{hash_to_hex_str(outpoint[:32])}i{num}'
+
+def get_refs_by_outpoint(self, outpoint): 
+    refs = []
+    key = b'ri' + outpoint
+    value = self.utxo_db.get(key)
+    for x in range(0, len(value), 37):
+        ref_id = outpoint_to_str(value[x : x + 36])
+        type_byte = value[x + 36: x + 37]
+        ref_type = 'normal'
+        if type_byte == b'00':
+            ref_type = 'normal'
+        elif type_byte == b'01':
+            ref_type = 'single'
+        else: 
+            raise IndexError(f'fatal unexpected ref type byte')
+        refs.append({
+            'ref': ref_id,
+            'type': ref_type
+        })
+    return refs

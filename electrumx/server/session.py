@@ -24,8 +24,9 @@ from aiorpcx import (
     TaskGroup, handler_invocation, RPCError, Request, sleep, Event, ReplyAndDisconnect,
     timeout_after
 )
-
-# from electrumx.server.httpserver import serve_http
+from electrumx.lib.util import (
+    pack_le_uint32
+)
 
 import pylru
 
@@ -1217,7 +1218,8 @@ class ElectrumX(SessionBase):
 
         return [{'tx_hash': hash_to_hex_str(utxo.tx_hash),
                  'tx_pos': utxo.tx_pos,
-                 'height': utxo.height, 'value': utxo.value}
+                 'height': utxo.height, 'value': utxo.value, 
+                 'refs': self.db.get_refs_by_outpoint(utxo.tx_hash + pack_le_uint32(utxo.tx_pos))}
                 for utxo in utxos
                 if (utxo.tx_hash, utxo.tx_pos) not in spends]
 
