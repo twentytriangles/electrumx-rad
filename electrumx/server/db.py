@@ -769,9 +769,9 @@ def get_refs_by_outpoint(self, outpoint):
         ref_id = outpoint_to_str(value[x : x + 36])
         type_byte = value[x + 36: x + 37]
         ref_type = 'normal'
-        if type_byte == b'00':
+        if type_byte == (0).to_bytes(1, "little"):
             ref_type = 'normal'
-        elif type_byte == b'01':
+        elif type_byte == (1).to_bytes(1, "little"):
             ref_type = 'single'
         else: 
             raise IndexError(f'fatal unexpected ref type byte')

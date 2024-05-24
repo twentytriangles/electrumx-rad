@@ -443,12 +443,12 @@ class BlockProcessor:
                 # Save all the refs if any for the utxo
                 refs_value = b''
                 for ref_id in all_refs_dedup.keys():
-                    enc_ref_type = b'00'
+                    enc_ref_type = 0
                     # check if it's a singleton ref by first ensuring it's not in the normal refs map
                     if not normal_refs_dedup.get(ref_id):
                         assert singleton_refs_dedup.get(ref_id)
-                        enc_ref_type = b'01'
-                    refs_value += ref_id + enc_ref_type
+                        enc_ref_type = 1
+                    refs_value += ref_id + (enc_ref_type).to_bytes(1, "little")
                 # Save the refs for the outpoint
                 if len(refs_value):
                     put_refs(tx_hash + to_le_uint32(idx), refs_value) 
