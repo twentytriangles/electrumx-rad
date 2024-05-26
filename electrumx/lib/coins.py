@@ -38,7 +38,7 @@ from hashlib import sha256
 from electrumx.lib import util
 from electrumx.lib.hash import Base58, double_sha256, double_sha512_256, hash_to_hex_str
 from electrumx.lib.hash import HASHX_LEN
-from electrumx.lib.script import ScriptPubKey
+from electrumx.lib.script import ScriptPubKey, Script
 import electrumx.lib.tx as lib_tx
 import electrumx.server.block_processor as block_proc
 from electrumx.server import daemon
@@ -127,7 +127,13 @@ class Coin:
                             .format(header_hex_hash, cls.GENESIS_HASH))
 
         return header + bytes(1)
-
+ 
+    @classmethod
+    def codeScriptHash_from_script(cls, script):
+        '''Returns a codeScriptHash from a script.'''
+        stateseperator_index = Script.get_stateseperator_index(script)
+        return sha256(script[stateseperator_index:]).digest()
+    
     @classmethod
     def hashX_from_script(cls, script):
         '''Returns a hashX from a script.'''

@@ -34,7 +34,7 @@ from electrumx.lib.util import (
     unpack_le_uint32_from
 )
 
-UTXO = namedtuple("UTXO", "tx_num tx_pos tx_hash height value")
+UTXO = namedtuple("UTXO", "tx_num tx_pos tx_hash height value codescript_hash")
 
 
 @attr.s(slots=True)
@@ -291,10 +291,12 @@ class DB(object):
         batch_put = batch.put
         for key, value in flush_data.adds.items():
             # suffix = tx_idx + tx_num
-            hashX = value[:-13]
+            hashX = value[:11]
+            codeScriptHash = value[11:43]
             suffix = key[-4:] + value[-13:-8]
-            batch_put(b'h' + key[:4] + suffix, hashX)
+            batch_put(b'h' + key[:4] + suffix, hashX + codeScriptHash)
             batch_put(b'u' + hashX + suffix, value[-8:])
+            batch_put(b'cu' + codeScriptHash + suffix, value[-8:])
         flush_data.adds.clear()
 
         # New Refs
@@ -693,6 +695,29 @@ class DB(object):
             # Key: b'u' + address_hashX + tx_idx + tx_num
             # Value: the UTXO value as a 64-bit unsigned integer
             prefix = b'u' + hashX
+            for db_key, db_value in self.utxo_db.iterator(prefix=prefix):
+                tx_pos, = unpack_le_uint32(db_key[-9:-5])
+                tx_num, = unpack_le_uint64(db_key[-5:] + bytes(3))
+                value, = unpack_le_uint64(db_value)
+                tx_hash, height = self.fs_tx_hash(tx_num)
+                utxos_append(UTXO(tx_num, tx_pos, tx_hash, height, value))
+            return utxos
+
+        while True:
+            utxos = await run_in_thread(read_utxos)
+            if all(utxo.tx_hash is not None for utxo in utxos):
+                return utxos
+            self.logger.warning('all_utxos: tx hash not found (reorg?), retrying...')
+            await sleep(0.25)
+
+    async def codescripthash_all_utxos(self, codeScriptHash):
+        '''Return all UTXOs for a codescripthash sorted in no particular order.'''
+        def read_utxos():
+            utxos = []
+            utxos_append = utxos.append
+            # Key: b'cu' + codeScriptHash + tx_idx + tx_num
+            # Value: the UTXO value as a 64-bit unsigned integer
+            prefix = b'cu' + codeScriptHash
             for db_key, db_value in self.utxo_db.iterator(prefix=prefix):
                 tx_pos, = unpack_le_uint32(db_key[-9:-5])
                 tx_num, = unpack_le_uint64(db_key[-5:] + bytes(3))

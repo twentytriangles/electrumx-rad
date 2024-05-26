@@ -399,6 +399,7 @@ class BlockProcessor:
         undo_info = []
         tx_num = self.tx_count
         script_hashX = self.coin.hashX_from_script
+        script_codeScriptHash = self.coin.codeScriptHash_from_script
         put_utxo = self.utxo_cache.__setitem__
         put_refs = self.ref_cache.__setitem__
         spend_utxo = self.spend_utxo
@@ -420,7 +421,7 @@ class BlockProcessor:
                     continue
                 cache_value = spend_utxo(txin.prev_hash, txin.prev_idx)
                 undo_info_append(cache_value)
-                append_hashX(cache_value[:-13])
+                append_hashX(cache_value[:HASHX_LEN])
 
             # Add the new UTXOs
             for idx, txout in enumerate(tx.outputs):
@@ -431,10 +432,10 @@ class BlockProcessor:
                 # Get the hashX
                 zero_refs = Script.zero_refs(txout.pk_script)
                 hashX = script_hashX(zero_refs)
-
+                codeScriptHash = script_codeScriptHash(txout.pk_script)
                 append_hashX(hashX)
                 put_utxo(tx_hash + to_le_uint32(idx),
-                         hashX + tx_numb + to_le_uint64(txout.value))
+                         hashX + codeScriptHash + tx_numb + to_le_uint64(txout.value))
 
                 all_refs, normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)
                 all_refs_dedup = Script.dedup_refs(all_refs)
@@ -516,7 +517,7 @@ class BlockProcessor:
         put_utxo = self.utxo_cache.__setitem__
         spend_utxo = self.spend_utxo
         touched = self.touched
-        undo_entry_len = 13 + HASHX_LEN
+        undo_entry_len = 13 + HASHX_LEN + 32 # 32 added for codScriptHash
         script_hashX = self.coin.hashX_from_script
 
         for tx, tx_hash in reversed(txs):
@@ -527,7 +528,7 @@ class BlockProcessor:
                     continue
 
                 cache_value = spend_utxo(tx_hash, idx)
-                touched.add(cache_value[:-13])
+                touched.add(cache_value[:HASHX_LEN])
                 
                 self.delete_potential_refs(tx_hash, idx)
                 normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
@@ -548,7 +549,7 @@ class BlockProcessor:
                 n -= undo_entry_len
                 undo_item = undo_info[n:n + undo_entry_len]
                 put_utxo(txin.prev_hash + pack_le_uint32(txin.prev_idx), undo_item)
-                touched.add(undo_item[:-13])
+                touched.add(undo_item[:HASHX_LEN])
 
         assert n == 0
         self.tx_count -= len(txs)
@@ -597,7 +598,20 @@ class BlockProcessor:
           Value: the UTXO value as a 64-bit unsigned integer
 
       2.  Key: b'h' + compressed_tx_hash + tx_idx + tx_num
-          Value: hashX
+          Value: hashX + codeScriptHash
+
+          **Note: Added "codeScriptHash" to support creation of the tables below for Radiant references.
+          
+    The UTXO database format also must be able to do a few things efficiently for Radiant references:
+
+        1. Given a codeScriptHash be able to list UTXOS and their values 
+
+        2. ...
+
+    To this end we maintain additional 'tables", one for each point above:
+
+        1. Key: b'cu' + codeScriptHash + tx_idx + tx_num
+          Value: the UTXO value as a 64-bit unsigned integer
 
     The compressed tx hash is just the first few bytes of the hash of
     the tx in which the UTXO was created.  As this is not unique there
@@ -623,12 +637,12 @@ class BlockProcessor:
         # Spend it from the DB.
 
         # Key: b'h' + compressed_tx_hash + tx_idx + tx_num
-        # Value: hashX
+        # Value: hashX + codeScriptHash
         prefix = b'h' + tx_hash[:4] + idx_packed
-        candidates = {db_key: hashX for db_key, hashX
+        candidates = {db_key: hashX_with_codescripthash for db_key, hashX_with_codescripthash
                       in self.db.utxo_db.iterator(prefix=prefix)}
 
-        for hdb_key, hashX in candidates.items():
+        for hdb_key, hashX_with_codescripthash in candidates.items():
             tx_num_packed = hdb_key[-5:]
 
             if len(candidates) > 1:
@@ -637,16 +651,20 @@ class BlockProcessor:
                 if fs_hash != tx_hash:
                     assert fs_hash is not None  # Should always be found
                     continue
-
+            hashX = hashX_with_codescripthash[:HASHX_LEN]
+            codeScriptHash = hashX_with_codescripthash[HASHX_LEN:]
             # Key: b'u' + address_hashX + tx_idx + tx_num
             # Value: the UTXO value as a 64-bit unsigned integer
             udb_key = b'u' + hashX + hdb_key[-9:]
             utxo_value_packed = self.db.utxo_db.get(udb_key)
-            if utxo_value_packed:
-                # Remove both entries for this UTXO
+            rdb_key = b'cu' + codeScriptHash + hdb_key[-9:]
+            ref_value_packed = self.db.utxo_db.get(rdb_key)
+            if utxo_value_packed and ref_value_packed:
+                # Remove all entries for this UTXO
                 self.db_deletes.append(hdb_key)
                 self.db_deletes.append(udb_key)
-                return hashX + tx_num_packed + utxo_value_packed
+                self.db_deletes.append(rdb_key)
+                return hashX + codeScriptHash + tx_num_packed + utxo_value_packed
 
         raise ChainError('UTXO {} / {:,d} not found in "h" table'
                          .format(hash_to_hex_str(tx_hash), tx_idx))

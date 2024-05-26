@@ -109,6 +109,7 @@ class MemPool(object):
         self.logger = class_logger(__name__, self.__class__.__name__)
         self.txs = {}
         self.hashXs = defaultdict(set)  # None can be a key
+        self.codeScriptHashes = defaultdict(set)  # None can be a key
         self.srefs = defaultdict(list) # Ordered list to keep track of first and last srefs transactions
         self.refresh_secs = refresh_secs
         self.log_status_secs = log_status_secs
@@ -208,6 +209,7 @@ class MemPool(object):
         # Re-sync with the new set of hashes
         txs = self.txs
         hashXs = self.hashXs
+        codeScriptHashes = self.codeScriptHashes
         srefs = self.srefs
 
         if mempool_height != self.api.db_height():
@@ -289,7 +291,8 @@ class MemPool(object):
                             if txin.prev_hash == ref[:32] and pack_le_uint32(txin.prev_idx) == ref[32:]:
                                 normal_mints.append(ref)
 
-                    track_refs = normal_mints[0:3] + singleton_refs[0:3]
+                    # Track all refs
+                    track_refs = normal_mints + singleton_refs
 
                     if len(track_refs) > 0:
                         ref_hashes = [to_hashX(ref) for ref in track_refs]
@@ -358,6 +361,17 @@ class MemPool(object):
             result.update(tx.prevouts)
         return result
 
+    async def codescripthash_potential_spends(self, codeScriptHash):
+        '''Return a set of (prev_hash, prev_idx) pairs from mempool
+        transactions that touch codeScriptHash.
+
+        None, some or all of these may be spends of the codeScriptHash, but all
+        actual spends of it (in the DB or mempool) will be included.
+        '''
+        result = set()
+        # Not implemented yet either
+        return result
+    
     async def transaction_summaries(self, hashX):
         '''Return a list of MemPoolTxSummary objects for the hashX.'''
         result = []
@@ -381,6 +395,10 @@ class MemPool(object):
                 if hX == hashX:
                     utxos.append(UTXO(-1, pos, tx_hash, 0, value))
         return utxos
+    
+    async def codescripthash_unordered_UTXOs(self, codeScriptHash):
+        # todo: this should be implemented for the codeScripthash
+        return []
 
     async def first_last_summaries(self, hashX):
         '''Return first and last UTXO tuples from mempool transactions that contain a singleton ref hash.'''

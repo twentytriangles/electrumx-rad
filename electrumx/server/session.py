@@ -1223,6 +1223,25 @@ class ElectrumX(SessionBase):
                 for utxo in utxos
                 if (utxo.tx_hash, utxo.tx_pos) not in spends]
 
+    async def codeScriptHash_listunspent(self, codeScriptHash):
+        '''Return the list of UTXOs of a code script hash, including mempool
+        effects.'''
+        utxos = await self.db.codescripthash_all_utxos(codeScriptHash)
+        utxos = sorted(utxos)
+        # the following codescripthash_unordered_UTXOs is not implemented yet
+        # Need a way to track codescripthash and hashX together
+        utxos.extend(await self.mempool.codescripthash_unordered_UTXOs(codeScriptHash))
+        self.bump_cost(1.0 + len(utxos) / 50)
+         # the following codescripthash_potential_spends is not implemented yet either
+        spends = await self.mempool.codescripthash_potential_spends(codeScriptHash)
+
+        return [{'tx_hash': hash_to_hex_str(utxo.tx_hash),
+                 'tx_pos': utxo.tx_pos,
+                 'height': utxo.height, 'value': utxo.value, 
+                 'refs': self.db.get_refs_by_outpoint(utxo.tx_hash + pack_le_uint32(utxo.tx_pos))}
+                for utxo in utxos
+                if (utxo.tx_hash, utxo.tx_pos) not in spends]
+    
     async def hashX_subscribe(self, hashX, alias):
         # Store the subscription only after address_status succeeds
         result = await self.address_status(hashX)

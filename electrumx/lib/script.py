@@ -207,6 +207,42 @@ class ScriptPubKey(object):
 class Script(object):
 
     @classmethod
+    def get_stateseperator_index(cls, script):
+        try:
+            n = 0
+            while n < len(script):
+                op = script[n]
+                # Found the state seperator
+                if op == OpCodes.OP_STATESEPERATOR:
+                    return n
+                
+                n += 1
+                if op <= OpCodes.OP_PUSHDATA4:
+                    # Raw bytes follow
+                    if op < OpCodes.OP_PUSHDATA1:
+                        dlen = op
+                    elif op == OpCodes.OP_PUSHDATA1:
+                        dlen = script[n]
+                        n += 1
+                    elif op == OpCodes.OP_PUSHDATA2:
+                        dlen, = unpack_le_uint16_from(script[n: n + 2])
+                        n += 2
+                    elif op == OpCodes.OP_PUSHDATA4:
+                        dlen, = unpack_le_uint32_from(script[n: n + 4])
+                        n += 4
+                    elif op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
+                        dlen = 36 # Grab 36 bytes for the hash
+                    if n + dlen > len(script):
+                        raise IndexError
+
+                    op = (op, script[n:n + dlen])
+                    n += dlen
+        except Exception:
+            raise ScriptError('truncated script') from None
+        # No state seperator found
+        return 0
+
+    @classmethod
     def get_ops(cls, script):
         ops = []
 
@@ -245,7 +281,6 @@ class Script(object):
             raise ScriptError('truncated script') from None
 
         return ops
-
     # Saves the push input refs of a script in the order they were encountered
     @classmethod
     def get_push_input_refs(cls, script):
