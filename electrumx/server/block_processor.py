@@ -193,6 +193,7 @@ class BlockProcessor:
         # UTXO cache
         self.utxo_cache = {}
         self.ref_cache = {}
+        self.data_cache = {}
         self.db_deletes = []
 
     async def run_with_lock(self, coro):
@@ -308,7 +309,7 @@ class BlockProcessor:
         '''The data for a flush.  The lock must be taken.'''
         assert self.state_lock.locked()
         return FlushData(self.height, self.tx_count, self.headers,
-                         self.tx_hashes, self.undo_infos, self.utxo_cache, self.ref_cache,
+                         self.tx_hashes, self.undo_infos, self.utxo_cache, self.ref_cache, self.data_cache,
                          self.db_deletes, self.tip)
 
     async def flush(self, flush_utxos):
@@ -402,6 +403,7 @@ class BlockProcessor:
         script_codeScriptHash = self.coin.codeScriptHash_from_script
         put_utxo = self.utxo_cache.__setitem__
         put_refs = self.ref_cache.__setitem__
+        put_data = self.data_cache.__setitem__
         spend_utxo = self.spend_utxo
         undo_info_append = undo_info.append
         update_touched = self.touched.update
@@ -450,9 +452,12 @@ class BlockProcessor:
                         assert singleton_refs_dedup.get(ref_id)
                         enc_ref_type = 1
                     refs_value += ref_id + (enc_ref_type).to_bytes(1, "little")
+                
                 # Save the refs for the outpoint
                 if len(refs_value):
                     put_refs(tx_hash + to_le_uint32(idx), refs_value) 
+                    # save the outpoint script 
+                    put_data(b'os' + tx_hash + to_le_uint32(idx), txout.pk_script)
                  
                 # Track history singleton refs
                 ref_hashes = [script_hashX(ref) for ref in singleton_refs_dedup.keys()]
@@ -505,6 +510,7 @@ class BlockProcessor:
         await sleep(0)
 
     def _backup_txs(self, txs, is_unspendable):
+        to_le_uint32 = pack_le_uint32
         # Prevout values, in order down the block (coinbase first if present)
         # undo_info is in reverse block order
         undo_info = self.db.read_undo_info(self.height)
@@ -530,12 +536,17 @@ class BlockProcessor:
                 cache_value = spend_utxo(tx_hash, idx)
                 touched.add(cache_value[:HASHX_LEN])
                 
+                # Delete any refs for outpoint
                 self.delete_potential_refs(tx_hash, idx)
-                normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
 
+                # Delete any script data for outpoint
+                self.delete_data(b'os' + tx_hash + idx)
+
+                normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
                 # Add history for all singleton refs
                 for ref_hash in singleton_refs:
                     touched.add(script_hashX(ref_hash))
+
                 # Add history for all normal refs
                 for ref in normal_refs:
                     for txin in tx.inputs:
@@ -683,6 +694,35 @@ class BlockProcessor:
             raise IndexError(f'Critical Error: Found in cache and DB')
         self.db_deletes.append(ri_db_key)
 
+    def delete_data(self, data_key):
+        '''Delete data
+        '''
+        # Remove from the cache
+        cached_value = self.data_cache.pop(data_key, None)
+        # Remove from db if not present in cache 
+        value_packed = self.db.utxo_db.get(data_key)
+        if cached_value and value_packed:
+            raise IndexError(f'Critical Error: Found in cache and DB')
+        self.db_deletes.append(data_key)
+
+    def get_data(self, data_key):
+        '''Get data
+        '''
+        # Get from the cache
+        cached_value = self.data_cache.pop(data_key, None)
+        if cached_value:
+            return cached_value
+        
+        # Get from db if not present in cache 
+        value_packed = self.db.utxo_db.get(data_key)
+        return value_packed
+
+    def get_output_script(self, txid, idx):
+        '''Get outputscript
+        '''
+        data_key = b'os' + txid + pack_le_uint32(idx)
+        return self.get_data(data_key)
+    
     async def _process_blocks(self):
         '''Loop forever processing blocks as they arrive.'''
         async def process_event():
