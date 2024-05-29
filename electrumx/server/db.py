@@ -47,6 +47,7 @@ class FlushData(object):
     undo_infos = attr.ib()
     adds = attr.ib()
     ref_adds = attr.ib()
+    data_adds = attr.ib()
     deletes = attr.ib()
     tip = attr.ib()
 
@@ -182,6 +183,7 @@ class DB(object):
         assert not flush_data.block_tx_hashes
         assert not flush_data.adds
         assert not flush_data.ref_adds
+        assert not flush_data.data_adds
         assert not flush_data.deletes
         assert not flush_data.undo_infos
         self.history.assert_flushed()
@@ -279,6 +281,7 @@ class DB(object):
         start_time = time.monotonic()
         add_count = len(flush_data.adds)
         ref_add_count = len(flush_data.ref_adds)
+        data_add_count = len(flush_data.data_adds)
         spend_count = len(flush_data.deletes) // 2
 
         # Spends
@@ -305,6 +308,12 @@ class DB(object):
             batch_put(b'ri' + key, value)
         flush_data.ref_adds.clear()
 
+        # New data
+        batch_put = batch.put
+        for key, value in flush_data.data_adds.items():
+            batch_put(key, value)
+        flush_data.data_adds.clear()
+
         # New undo information
         self.flush_undo_infos(batch_put, flush_data.undo_infos)
         flush_data.undo_infos.clear()
@@ -314,7 +323,7 @@ class DB(object):
             tx_count = flush_data.tx_count - self.db_tx_count
             elapsed = time.monotonic() - start_time
             self.logger.info(f'flushed {block_count:,d} blocks with '
-                             f'{tx_count:,d} txs, {add_count:,d} UTXO adds, {ref_add_count:,d} ref adds, '
+                             f'{tx_count:,d} txs, {add_count:,d} UTXO adds, {ref_add_count:,d} ref adds, {data_add_count:,d} data adds, '
                              f'{spend_count:,d} spends in '
                              f'{elapsed:.1f}s, committing...')
 
