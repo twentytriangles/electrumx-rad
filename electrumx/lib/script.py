@@ -230,14 +230,18 @@ class Script(object):
                     elif op == OpCodes.OP_PUSHDATA4:
                         dlen, = unpack_le_uint32_from(script[n: n + 4])
                         n += 4
-                    elif op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
-                        dlen = 36 # Grab 36 bytes for the hash
                     if n + dlen > len(script):
                         raise IndexError
+                    n += dlen 
 
-                    op = (op, script[n:n + dlen])
-                    n += dlen
-        except Exception:
+                elif op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
+                    dlen = 36 # Grab 36 bytes for the hash
+                    if n + dlen > len(script):
+                        raise IndexError
+                    n += dlen 
+
+        except Exception as e:
+            print(f'e {e}')
             raise ScriptError('truncated script') from None
         # No state seperator found
         return 0
@@ -266,14 +270,18 @@ class Script(object):
                     elif op == OpCodes.OP_PUSHDATA4:
                         dlen, = unpack_le_uint32_from(script[n: n + 4])
                         n += 4
-                    elif op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
-                        dlen = 36 # Grab 36 bytes for the hash
+
                     if n + dlen > len(script):
                         raise IndexError
+                    n += dlen 
 
-                    op = (op, script[n:n + dlen])
-                    n += dlen
+                elif op == OpCodes.OP_PUSHINPUTREF or op == OpCodes.OP_REQUIREINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREF or op == OpCodes.OP_DISALLOWPUSHINPUTREFSIBLING or op == OpCodes.OP_PUSHINPUTREFSINGLETON:
+                    dlen = 36 # Grab 36 bytes for the hash
+                    if n + dlen > len(script):
+                        raise IndexError
+                    n += dlen 
 
+                op = (op, script[n:n + dlen])
                 ops.append(op)
         except Exception:
             # Truncated script; e.g. tx_hash
