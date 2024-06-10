@@ -1223,7 +1223,7 @@ class ElectrumX(SessionBase):
                 for utxo in utxos
                 if (utxo.tx_hash, utxo.tx_pos) not in spends]
 
-    async def codeScriptHash_listunspent(self, codeScriptHash):
+    async def codescripthash_listunspent(self, codeScriptHash):
         '''Return the list of UTXOs of a code script hash, including mempool
         effects.'''
         utxos = await self.db.codescripthash_all_utxos(codeScriptHash)
@@ -1571,6 +1571,7 @@ class ElectrumX(SessionBase):
             'blockchain.scripthash.get_mempool': self.scripthash_get_mempool,
             'blockchain.scripthash.listunspent': self.scripthash_listunspent,
             'blockchain.scripthash.subscribe': self.scripthash_subscribe,
+            'blockchain.codescripthash.listunspent': self.codescripthash_listunspent,
             'blockchain.transaction.broadcast': self.transaction_broadcast,
             'blockchain.transaction.get': self.transaction_get,
             'blockchain.transaction.get_merkle': self.transaction_merkle,
