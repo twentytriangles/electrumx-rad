@@ -21,7 +21,7 @@ import attr
 from aiorpcx import run_in_thread, sleep
 
 from electrumx.lib import util
-from electrumx.lib.hash import hash_to_hex_str
+from electrumx.lib.hash import hash_to_hex_str, HASHX_LEN
 from electrumx.lib.merkle import Merkle, MerkleCache
 from electrumx.lib.util import (
     formatted_time, pack_be_uint16, pack_be_uint32, pack_le_uint32,
@@ -34,7 +34,7 @@ from electrumx.lib.util import (
     unpack_le_uint32_from
 )
 
-UTXO = namedtuple("UTXO", "tx_num tx_pos tx_hash height value codescript_hash")
+UTXO = namedtuple("UTXO", "tx_num tx_pos tx_hash height value")
 
 
 @attr.s(slots=True)
@@ -760,7 +760,8 @@ class DB(object):
                 prefix = b'h' + tx_hash[:4] + idx_packed
 
                 # Find which entry, if any, the TX_HASH matches.
-                for db_key, hashX in self.utxo_db.iterator(prefix=prefix):
+                for db_key, hashX_with_codescripthash in self.utxo_db.iterator(prefix=prefix):
+                    hashX = hashX_with_codescripthash[:HASHX_LEN]
                     tx_num_packed = db_key[-5:]
                     tx_num, = unpack_le_uint64(tx_num_packed + bytes(3))
                     fs_hash, _height = self.fs_tx_hash(tx_num)
@@ -791,26 +792,28 @@ class DB(object):
         hashX_pairs = await run_in_thread(lookup_hashXs)
         return await run_in_thread(lookup_utxos, hashX_pairs)
 
-def outpoint_to_str(self, outpoint):
-    num, = unpack_le_uint32_from(outpoint[32:])
-    return f'{hash_to_hex_str(outpoint[:32])}i{num}'
+    def outpoint_to_str(self, outpoint):
+        num, = unpack_le_uint32_from(outpoint[32:])
+        return f'{hash_to_hex_str(outpoint[:32])}i{num}'
 
-def get_refs_by_outpoint(self, outpoint): 
-    refs = []
-    key = b'ri' + outpoint
-    value = self.utxo_db.get(key)
-    for x in range(0, len(value), 37):
-        ref_id = outpoint_to_str(value[x : x + 36])
-        type_byte = value[x + 36: x + 37]
-        ref_type = 'normal'
-        if type_byte == (0).to_bytes(1, "little"):
+    def get_refs_by_outpoint(self, outpoint): 
+        refs = []
+        key = b'ri' + outpoint
+        value = self.utxo_db.get(key)
+        if not value:
+            return []
+        for x in range(0, len(value), 37):
+            ref_id = self.outpoint_to_str(value[x : x + 36])
+            type_byte = value[x + 36: x + 37]
             ref_type = 'normal'
-        elif type_byte == (1).to_bytes(1, "little"):
-            ref_type = 'single'
-        else: 
-            raise IndexError(f'fatal unexpected ref type byte')
-        refs.append({
-            'ref': ref_id,
-            'type': ref_type
-        })
-    return refs
+            if type_byte == (0).to_bytes(1, "little"):
+                ref_type = 'normal'
+            elif type_byte == (1).to_bytes(1, "little"):
+                ref_type = 'single'
+            else: 
+                raise IndexError(f'fatal unexpected ref type byte')
+            refs.append({
+                'ref': ref_id,
+                'type': ref_type
+            })
+        return refs
