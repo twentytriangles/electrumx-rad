@@ -177,7 +177,8 @@ class MemPool(object):
                     for ref_hash in ref_hashes:
                         touched.add(ref_hash)
                         hashXs[ref_hash].add(tx_hash)
-                        srefs[ref_hash].append(tx_hash)
+                        if tx_hash not in srefs[ref_hash]:
+                            srefs[ref_hash].append(tx_hash)
 
         return deferred, {prevout: utxo_map[prevout] for prevout in unspent}
 
