@@ -30,7 +30,7 @@ class MemPoolTx(object):
     fee = attr.ib()
     size = attr.ib()
     out_srefs = attr.ib()
-
+    idx_to_script = attr.ib()   # Track full output script at given output index
 
 @attr.s(slots=True)
 class MemPoolTxSummary(object):
@@ -185,8 +185,9 @@ class MemPool(object):
 
             # Check every output script for refs to build up the outpointToRefs map for quickly enumering which refs
             # are associated with each outpoint for the purposes of returning refs for unconfirmed utxos in mempool
-            for idx, txout in enumerate(tx.outputs):
-                all_refs, normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)
+            out_idx = 0
+            for pk_script in tx.idx_to_script:
+                all_refs, normal_refs, singleton_refs = Script.get_push_input_refs(pk_script)
                 all_refs_dedup = Script.dedup_refs(all_refs)
                 normal_refs_dedup = Script.dedup_refs(normal_refs)
                 singleton_refs_dedup = Script.dedup_refs(singleton_refs)
@@ -201,7 +202,8 @@ class MemPool(object):
                     refs_value += ref_id + (enc_ref_type).to_bytes(1, "little")
                 # cache the refs for the outpoint
                 if len(refs_value):
-                    outpointToRefs.update(tx_hash + to_le_uint32(idx), refs_value) 
+                    outpointToRefs[tx_hash + to_le_uint32(out_idx)] = refs_value
+                out_idx += 1 
 
         return deferred, {prevout: utxo_map[prevout] for prevout in unspent}
 
@@ -259,8 +261,10 @@ class MemPool(object):
 
             # Handle the outpoints that have disappeared from the mempool to remove the entries in outpointToRefs
             # This maintains the outpointToRefs to always contain the unconfirmed mempool outpoints which contain refs
-            for idx, txout in enumerate(tx.outputs):
-                del outpointToRefs[tx_hash + to_le_uint32(idx)]
+            out_idx = 0
+            for _pk_script in enumerate(tx.idx_to_script):
+                outpointToRefs.pop(tx_hash + to_le_uint32(out_idx), None)
+                out_idx += 1
                   
         # Process new transactions
         new_hashes = list(all_hashes.difference(txs))
@@ -313,7 +317,9 @@ class MemPool(object):
                                     for txout in tx.outputs)
 
                 out_srefs = []
+                out_idx_to_scripts = []
                 for txout in tx.outputs:
+                    out_idx_to_scripts.append(txout.pk_script)
                     normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
 
                     normal_mints = []
@@ -332,7 +338,7 @@ class MemPool(object):
                         out_srefs.append([])
 
                 txs[tx_hash] = MemPoolTx(txin_pairs, None, txout_pairs,
-                                         0, tx_size, out_srefs)
+                                         0, tx_size, out_srefs, out_idx_to_scripts)
 
             return txs
 
