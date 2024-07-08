@@ -16,7 +16,7 @@ import attr
 from aiorpcx import TaskGroup, run_in_thread, sleep
 
 from electrumx.lib.hash import hash_to_hex_str, hex_str_to_hash
-from electrumx.lib.util import class_logger, chunks, pack_le_uint32
+from electrumx.lib.util import class_logger, chunks, pack_le_uint32, unpack_le_uint32_from
 from electrumx.lib.script import Script
 from electrumx.server.db import UTXO
 
@@ -30,7 +30,7 @@ class MemPoolTx(object):
     fee = attr.ib()
     size = attr.ib()
     out_srefs = attr.ib()
-
+    idx_to_script = attr.ib()   # Track full output script at given output index
 
 @attr.s(slots=True)
 class MemPoolTxSummary(object):
@@ -108,8 +108,9 @@ class MemPool(object):
         self.api = api
         self.logger = class_logger(__name__, self.__class__.__name__)
         self.txs = {}
-        self.hashXs = defaultdict(set)  # None can be a key
-        self.codeScriptHashes = defaultdict(set)  # None can be a key
+        self.hashXs = defaultdict(set)              # None can be a key
+        self.outpointToRefs = defaultdict(set)      # None can be a key
+        self.codeScriptHashes = defaultdict(set)    # None can be a key
         self.srefs = defaultdict(list) # Ordered list to keep track of first and last srefs transactions
         self.refresh_secs = refresh_secs
         self.log_status_secs = log_status_secs
@@ -137,8 +138,11 @@ class MemPool(object):
         Returns an (unprocessed tx_map, unspent utxo_map) pair.
         '''
         hashXs = self.hashXs
+        outpointToRefs = self.outpointToRefs
+        codeScriptHashes = self.codeScriptHashes # not used yet
         srefs = self.srefs
         txs = self.txs
+        to_le_uint32 = pack_le_uint32
 
         deferred = {}
         unspent = set(utxo_map)
@@ -180,6 +184,28 @@ class MemPool(object):
                         if tx_hash not in srefs[ref_hash]:
                             srefs[ref_hash].append(tx_hash)
 
+            # Check every output script for refs to build up the outpointToRefs map for quickly enumering which refs
+            # are associated with each outpoint for the purposes of returning refs for unconfirmed utxos in mempool
+            out_idx = 0
+            for pk_script in tx.idx_to_script:
+                all_refs, normal_refs, singleton_refs = Script.get_push_input_refs(pk_script)
+                all_refs_dedup = Script.dedup_refs(all_refs)
+                normal_refs_dedup = Script.dedup_refs(normal_refs)
+                singleton_refs_dedup = Script.dedup_refs(singleton_refs)
+                # Save all the refs if any for the utxo
+                refs_value = b''
+                for ref_id in all_refs_dedup.keys():
+                    enc_ref_type = 0
+                    # check if it's a singleton ref by first ensuring it's not in the normal refs map
+                    if not normal_refs_dedup.get(ref_id):
+                        assert singleton_refs_dedup.get(ref_id)
+                        enc_ref_type = 1
+                    refs_value += ref_id + (enc_ref_type).to_bytes(1, "little")
+                # cache the refs for the outpoint
+                if len(refs_value):
+                    outpointToRefs[tx_hash + to_le_uint32(out_idx)] = refs_value
+                out_idx += 1 
+
         return deferred, {prevout: utxo_map[prevout] for prevout in unspent}
 
     async def _refresh_hashes(self, synchronized_event):
@@ -210,7 +236,9 @@ class MemPool(object):
         # Re-sync with the new set of hashes
         txs = self.txs
         hashXs = self.hashXs
-        codeScriptHashes = self.codeScriptHashes
+        codeScriptHashes = self.codeScriptHashes # not used yet
+        outpointToRefs = self.outpointToRefs
+        to_le_uint32 = pack_le_uint32
         srefs = self.srefs
 
         if mempool_height != self.api.db_height():
@@ -232,6 +260,13 @@ class MemPool(object):
                     del srefs[hashX]
             touched.update(tx_hashXs)
 
+            # Handle the outpoints that have disappeared from the mempool to remove the entries in outpointToRefs
+            # This maintains the outpointToRefs to always contain the unconfirmed mempool outpoints which contain refs
+            out_idx = 0
+            for _pk_script in enumerate(tx.idx_to_script):
+                outpointToRefs.pop(tx_hash + to_le_uint32(out_idx), None)
+                out_idx += 1
+                  
         # Process new transactions
         new_hashes = list(all_hashes.difference(txs))
         if new_hashes:
@@ -283,7 +318,9 @@ class MemPool(object):
                                     for txout in tx.outputs)
 
                 out_srefs = []
+                out_idx_to_scripts = []
                 for txout in tx.outputs:
+                    out_idx_to_scripts.append(txout.pk_script)
                     normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
 
                     normal_mints = []
@@ -302,7 +339,7 @@ class MemPool(object):
                         out_srefs.append([])
 
                 txs[tx_hash] = MemPoolTx(txin_pairs, None, txout_pairs,
-                                         0, tx_size, out_srefs)
+                                         0, tx_size, out_srefs, out_idx_to_scripts)
 
             return txs
 
@@ -326,6 +363,34 @@ class MemPool(object):
     # External interface
     #
 
+    def get_refs_by_outpoint(self, outpoint):
+        # Format outpoint to a string utility function
+        def outpoint_to_str(outpoint):
+            num, = unpack_le_uint32_from(outpoint[32:])
+            return f'{hash_to_hex_str(outpoint[:32])}i{num}'
+        
+        # Get from cache if present
+        value = self.outpointToRefs.get(outpoint, None)
+        if not value:
+            return []
+    
+        refs = []
+        for x in range(0, len(value), 37):
+            ref_id = outpoint_to_str(value[x : x + 36])
+            type_byte = value[x + 36: x + 37]
+            ref_type = 'normal'
+            if type_byte == (0).to_bytes(1, "little"):
+                ref_type = 'normal'
+            elif type_byte == (1).to_bytes(1, "little"):
+                ref_type = 'single'
+            else: 
+                raise IndexError(f'fatal unexpected ref type byte')
+            refs.append({
+                'ref': ref_id,
+                'type': ref_type
+            })
+        return refs
+    
     async def keep_synchronized(self, synchronized_event):
         '''Keep the mempool synchronized with the daemon.'''
         async with TaskGroup() as group:

@@ -1208,6 +1208,15 @@ class ElectrumX(SessionBase):
             self.unsubscribe_hashX(hashX)
             return None
 
+    def get_refs_by_outpoint(self, outpoint):
+        '''Get refs by the outpoint
+        '''
+        refs = self.mempool.get_refs_by_outpoint(outpoint)
+        if len(refs):
+            return refs
+        # Not found in the mempool, check the database
+        return self.db.get_refs_by_outpoint(outpoint)
+
     async def hashX_listunspent(self, hashX):
         '''Return the list of UTXOs of a script hash, including mempool
         effects.'''
@@ -1220,7 +1229,7 @@ class ElectrumX(SessionBase):
         return [{'tx_hash': hash_to_hex_str(utxo.tx_hash),
                  'tx_pos': utxo.tx_pos,
                  'height': utxo.height, 'value': utxo.value, 
-                 'refs': self.db.get_refs_by_outpoint(utxo.tx_hash + pack_le_uint32(utxo.tx_pos))}
+                 'refs': self.get_refs_by_outpoint(utxo.tx_hash + pack_le_uint32(utxo.tx_pos))}
                 for utxo in utxos
                 if (utxo.tx_hash, utxo.tx_pos) not in spends]
 
@@ -1240,7 +1249,7 @@ class ElectrumX(SessionBase):
         return [{'tx_hash': hash_to_hex_str(utxo.tx_hash),
                  'tx_pos': utxo.tx_pos,
                  'height': utxo.height, 'value': utxo.value, 
-                 'refs': self.db.get_refs_by_outpoint(utxo.tx_hash + pack_le_uint32(utxo.tx_pos))}
+                 'refs': self.get_refs_by_outpoint(utxo.tx_hash + pack_le_uint32(utxo.tx_pos))}
                 for utxo in utxos
                 if (utxo.tx_hash, utxo.tx_pos) not in spends]
     
@@ -1593,7 +1602,6 @@ class ElectrumX(SessionBase):
             handlers['blockchain.scripthash.unsubscribe'] = self.scripthash_unsubscribe
 
         self.request_handlers = handlers
-
 
 class LocalRPC(SessionBase):
     '''A local TCP RPC server session.'''
