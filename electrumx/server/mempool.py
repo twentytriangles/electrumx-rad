@@ -181,7 +181,8 @@ class MemPool(object):
                     for ref_hash in ref_hashes:
                         touched.add(ref_hash)
                         hashXs[ref_hash].add(tx_hash)
-                        srefs[ref_hash].append(tx_hash)
+                        if tx_hash not in srefs[ref_hash]:
+                            srefs[ref_hash].append(tx_hash)
 
             # Check every output script for refs to build up the outpointToRefs map for quickly enumering which refs
             # are associated with each outpoint for the purposes of returning refs for unconfirmed utxos in mempool
