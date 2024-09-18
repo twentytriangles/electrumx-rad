@@ -299,7 +299,6 @@ class DB(object):
             suffix = key[-4:] + value[-13:-8]
             batch_put(b'h' + key[:4] + suffix, hashX + codeScriptHash)
             batch_put(b'u' + hashX + suffix, value[-8:])
-            batch_put(b'cu' + codeScriptHash + suffix, value[-8:])
         flush_data.adds.clear()
 
         # New Refs
