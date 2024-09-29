@@ -11,24 +11,19 @@ services:
     cap_add:
       - SYS_PTRACE
     environment:
-      - DAEMON_URL=http://dockeruser:dockerpass@host.docker.internal:7332/
-      - COIN=Radiant
-      - REQUEST_TIMEOUT=60
-      - DB_DIRECTORY=/root/electrumdb
-      - DB_ENGINE=leveldb
-      - SERVICES=tcp://0.0.0.0:50010,SSL://0.0.0.0:50012
-      - SSL_CERTFILE=/root/electrumx/server.crt
-      - SSL_KEYFILE=/root/electrumx/server.key
-      - ALLOW_ROOT=true
-      - CACHE_MB=10000
-      - MAX_SESSIONS=10000
-      - MAX_SEND=10000000
-      - MAX_RECV=10000000
+      - DAEMON_URL=${DAEMON_URL}
+      - COIN=${COIN}
+      - REQUEST_TIMEOUT=${REQUEST_TIMEOUT}
+      - DB_DIRECTORY=${DB_DIRECTORY}
+      - DB_ENGINE=${DB_ENGINE}
+      - SERVICES=${SERVICES}
+      - SSL_CERTFILE=${SSL_CERTFILE}
+      - SSL_KEYFILE=${SSL_KEYFILE}
+      - ALLOW_ROOT=${ALLOW_ROOT}
+      - CACHE_MB=${CACHE_MB}
+      - MAX_SESSIONS=${MAX_SESSIONS}
+      - MAX_SEND=${MAX_SEND}
+      - MAX_RECV=${MAX_RECV}
     volumes:
       - ./electrumdb:/root/electrumdb   # Mount local directory for database and SSL keys
-#    entrypoint: ["sleep", "100000"]
     entrypoint: ["python3", "electrumx_server"]
-
-#networks:
-#  shared_network:
-#    external: true  # Use the shared network created outside the compose file
