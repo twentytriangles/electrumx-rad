@@ -1,0 +1,34 @@
+version: "3"
+services:
+  electrumx:
+    build:
+      context: .
+      dockerfile: ./contrib/radiant/Dockerfile
+    container_name: electrumx_server
+    ports:
+      - "50010:50010"   # Port for TCP connections
+      - "50012:50012"   # Port for SSL connections
+    cap_add:
+      - SYS_PTRACE
+    environment:
+      - DAEMON_URL=http://dockeruser:dockerpass@host.docker.internal:7332/
+      - COIN=Radiant
+      - REQUEST_TIMEOUT=60
+      - DB_DIRECTORY=/root/electrumdb
+      - DB_ENGINE=leveldb
+      - SERVICES=tcp://0.0.0.0:50010,SSL://0.0.0.0:50012
+      - SSL_CERTFILE=/root/electrumx/server.crt
+      - SSL_KEYFILE=/root/electrumx/server.key
+      - ALLOW_ROOT=true
+      - CACHE_MB=10000
+      - MAX_SESSIONS=10000
+      - MAX_SEND=10000000
+      - MAX_RECV=10000000
+    volumes:
+      - ./electrumdb:/root/electrumdb   # Mount local directory for database and SSL keys
+#    entrypoint: ["sleep", "100000"]
+    entrypoint: ["python3", "electrumx_server"]
+
+#networks:
+#  shared_network:
+#    external: true  # Use the shared network created outside the compose file
