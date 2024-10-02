@@ -24,6 +24,8 @@ services:
       - MAX_SESSIONS=${MAX_SESSIONS}
       - MAX_SEND=${MAX_SEND}
       - MAX_RECV=${MAX_RECV}
+    network_mode: "host"
+    stop_grace_period: 120s
     volumes:
       - ./electrumdb:/root/electrumdb   # Mount local directory for database and SSL keys
     entrypoint: ["python3", "electrumx_server"]
