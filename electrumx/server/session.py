@@ -153,9 +153,6 @@ class SessionManager:
         self._ref_get_cache = pylru.lrucache(1000)
         self._ref_get_lookups = 0
         self._ref_get_hits = 0
-        self._first_last_history_cache = pylru.lrucache(1000)
-        self._first_last_history_lookups = 0
-        self._first_last_history_hits = 0
         self._tx_hashes_cache = pylru.lrucache(1000)
         self._tx_hashes_lookups = 0
         self._tx_hashes_hits = 0
@@ -891,7 +888,7 @@ class SessionManager:
             cache = self._history_cache
             for hashX in set(cache).intersection(touched):
                 del cache[hashX]
-            cache = self._first_last_history_cache
+            cache = self._ref_get_cache
             for hashX in set(cache).intersection(touched):
                 del cache[hashX]
 
