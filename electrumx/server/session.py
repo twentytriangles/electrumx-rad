@@ -150,6 +150,9 @@ class SessionManager:
         self._history_cache = pylru.lrucache(1000)
         self._history_lookups = 0
         self._history_hits = 0
+        self._utxo_cache = pylru.lrucache(1000)
+        self._utxo_lookups = 0
+        self._utxo_hits = 0
         self._ref_get_cache = pylru.lrucache(1000)
         self._ref_get_lookups = 0
         self._ref_get_hits = 0
@@ -838,6 +841,23 @@ class SessionManager:
         self.txs_sent += 1
         return hex_hash
 
+    async def utxo_summary(self, hashX):
+        cost = 0.1
+        try:
+            result = self._utxo_cache[hashX]
+            self._utxo_hits += 1
+        except KeyError:
+            utxos = await self.db.all_utxos(hashX)
+            cost += (1.0 + len(utxos) / 100)
+            concat = ''.join(f'{hash_to_hex_str(utxo.tx_hash)}:'
+                            f'{utxo.height:d}:'
+                            for utxo in utxos)
+            result = sha256(concat.encode()).hex()
+            self._utxo_cache[hashX] = result
+        if isinstance(result, Exception):
+            raise result
+        return result, cost
+
     async def limited_history(self, hashX):
         '''Returns a pair (history, cost).
 
@@ -889,6 +909,9 @@ class SessionManager:
             for hashX in set(cache).intersection(touched):
                 del cache[hashX]
             cache = self._ref_get_cache
+            for hashX in set(cache).intersection(touched):
+                del cache[hashX]
+            cache = self._utxo_cache
             for hashX in set(cache).intersection(touched):
                 del cache[hashX]
 
@@ -1175,12 +1198,17 @@ class ElectrumX(SessionBase):
         '''
         # Note history is ordered and mempool unordered in electrum-server
         # For mempool, height is -1 if it has unconfirmed inputs, otherwise 0
-        db_history, cost = await self.session_mgr.limited_history(hashX)
-        mempool = await self.mempool.transaction_summaries(hashX)
+        utxos_only = self.kind[0] == "W"
+        if utxos_only:
+            status, cost = await self.session_mgr.utxo_summary(hashX)
+        else:
+            db_history, cost = await self.session_mgr.limited_history(hashX)
 
-        status = ''.join(f'{hash_to_hex_str(tx_hash)}:'
-                         f'{height:d}:'
-                         for tx_hash, height in db_history)
+            status = ''.join(f'{hash_to_hex_str(tx_hash)}:'
+                            f'{height:d}:'
+                            for tx_hash, height in db_history)
+
+        mempool = await self.mempool.transaction_summaries(hashX)
         status += ''.join(f'{hash_to_hex_str(tx.hash)}:'
                           f'{-tx.has_unconfirmed_inputs:d}:'
                           for tx in mempool)
