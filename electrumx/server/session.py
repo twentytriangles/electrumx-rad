@@ -838,24 +838,25 @@ class SessionManager:
         self.txs_sent += 1
         return hex_hash
 
-    async def limited_history(self, hashX):
+    async def limited_history(self, hashX, truncate=False):
         '''Returns a pair (history, cost).
 
         History is a sorted list of (tx_hash, height) tuples, or an RPCError.'''
         # History DoS limit.  Each element of history is about 99 bytes when encoded
         # as JSON.
-        limit = self.env.max_send // 99
+        limit = 100 if truncate else self.env.max_send // 99
         cost = 0.1
         self._history_lookups += 1
+        cache_key = hashX + bytes((truncate,))
         try:
-            result = self._history_cache[hashX]
+            result = self._history_cache[cache_key]
             self._history_hits += 1
         except KeyError:
             result = await self.db.limited_history(hashX, limit=limit)
             cost += 0.1 + len(result) * 0.001
-            if len(result) >= limit:
+            if not truncate and len(result) >= limit:
                 result = RPCError(BAD_REQUEST, 'history too large', cost=cost)
-            self._history_cache[hashX] = result
+            self._history_cache[cache_key] = result
 
         if isinstance(result, Exception):
             raise result
@@ -1175,7 +1176,8 @@ class ElectrumX(SessionBase):
         '''
         # Note history is ordered and mempool unordered in electrum-server
         # For mempool, height is -1 if it has unconfirmed inputs, otherwise 0
-        db_history, cost = await self.session_mgr.limited_history(hashX)
+        truncate = self.kind[0] == "W"
+        db_history, cost = await self.session_mgr.limited_history(hashX, truncate)
         mempool = await self.mempool.transaction_summaries(hashX)
 
         status = ''.join(f'{hash_to_hex_str(tx_hash)}:'
