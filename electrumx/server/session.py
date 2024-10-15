@@ -881,19 +881,21 @@ class SessionManager:
             raise result
         return result, cost
 
-    async def ref_get_db(self, ref):
+    # FIXME should only use ref or ref_hash
+    async def ref_get_db(self, ref, ref_hash):
         '''Returns the mint and location for a ref'''
         cost = 0.1
         self._ref_get_lookups += 1
         try:
-            result = self._ref_get_cache[ref]
+            # Ref hash is used because they are hashed in touched array when notifying
+            result = self._ref_get_cache[ref_hash]
             self._ref_get_hits += 1
         except KeyError:
             mint = self.db.get_ref_mint(ref)
             loc = self.db.get_ref_location(ref)
             cost += 0.202
             result = [mint, loc]
-            self._ref_get_cache[ref] = result
+            self._ref_get_cache[ref_hash] = result
 
         if isinstance(result, Exception):
             raise result
@@ -1556,7 +1558,7 @@ class ElectrumX(SessionBase):
         '''Return the first and last transactions for a singleton ref or a normal ref mint'''
         ref = assert_ref(ref)
         ref_hash = self.env.coin.hashX_from_script(ref)
-        db_values, cost = await self.session_mgr.ref_get_db(ref)
+        db_values, cost = await self.session_mgr.ref_get_db(ref, ref_hash)
         mempool_values = await self.mempool.first_last_summaries(ref_hash)
 
         all_values = []

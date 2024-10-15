@@ -424,8 +424,8 @@ class BlockProcessor:
             hashXs = []
             append_hashX = hashXs.append
             tx_numb = to_le_uint64(tx_num)[:5]
-            refs = []
-            append_ref = refs.append
+            ref_hashes = []
+            append_ref_hash = ref_hashes.append
 
             # Spend the inputs
             for txin in tx.inputs:
@@ -482,21 +482,21 @@ class BlockProcessor:
                             if cur_loc:
                                 set_ref_loc_undo(ref, cur_loc)
 
-                    append_ref(ref)
+                    append_ref_hash(script_hashX(ref))
 
                 # Track normal ref mints
                 # Location for normal refs are not tracked
                 for ref in normal_refs_dedup.keys():
                     if any(txin.prev_hash == ref[:32] and to_le_uint32(txin.prev_idx) == ref[32:] for txin in tx.inputs):
                         put_ref_mint(ref, tx_hash)
-                        append_ref(ref)
+                        append_ref_hash(script_hashX(ref))
 
                 # We could check for refs used in inputs that are burnt in this tx,
                 # but current burn implementations are done using op return so this may not be needed
 
             append_hashXs(hashXs)
             update_touched(hashXs)
-            update_touched(refs)
+            update_touched(ref_hashes)
             tx_num += 1
 
         self.db.history.add_unflushed(hashXs_by_tx, self.tx_count)
