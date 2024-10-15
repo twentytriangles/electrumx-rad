@@ -1626,6 +1626,7 @@ class ElectrumX(SessionBase):
             'blockchain.scripthash.get_mempool': self.scripthash_get_mempool,
             'blockchain.scripthash.listunspent': self.scripthash_listunspent,
             'blockchain.scripthash.subscribe': self.scripthash_subscribe,
+            'blockchain.scripthash.unsubscribe': self.scripthash_unsubscribe,
             'blockchain.transaction.broadcast': self.transaction_broadcast,
             'blockchain.transaction.get': self.transaction_get,
             'blockchain.transaction.get_merkle': self.transaction_merkle,
@@ -1640,9 +1641,6 @@ class ElectrumX(SessionBase):
             'server.ping': self.ping,
             'server.version': self.server_version,
         }
-
-        if ptuple >= (1, 4, 2):
-            handlers['blockchain.scripthash.unsubscribe'] = self.scripthash_unsubscribe
 
         self.request_handlers = handlers
 
